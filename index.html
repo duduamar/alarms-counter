@@ -1,0 +1,463 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Amar Alarms Counter</title>
+    <style>
+      :root {
+        --bg-top: #f7f4ea;
+        --bg-bottom: #d8e9f5;
+        --card: #ffffffcc;
+        --ink: #1d2b36;
+        --accent: #005f73;
+        --accent-2: #0a9396;
+        --danger: #b22222;
+        --muted: #5f6c75;
+        --shadow: 0 18px 40px rgba(0, 43, 64, 0.16);
+        font-family: "Avenir Next", "Trebuchet MS", "Segoe UI", sans-serif;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        color: var(--ink);
+        background:
+          radial-gradient(circle at 15% 10%, #fff6d5 0%, transparent 40%),
+          radial-gradient(circle at 85% 5%, #cce6ff 0%, transparent 40%),
+          linear-gradient(180deg, var(--bg-top), var(--bg-bottom));
+        display: grid;
+        place-items: center;
+        padding: 2rem 1rem;
+      }
+
+      .panel {
+        width: min(760px, 100%);
+        background: var(--card);
+        backdrop-filter: blur(6px);
+        border: 1px solid #ffffff99;
+        border-radius: 20px;
+        box-shadow: var(--shadow);
+        padding: 1.2rem;
+      }
+
+      h1 {
+        margin: 0;
+        font-size: clamp(1.4rem, 3vw, 2rem);
+        letter-spacing: 0.02em;
+      }
+
+      .sub {
+        margin: 0.25rem 0 1rem;
+        color: var(--muted);
+        font-size: 0.95rem;
+      }
+
+      .controls {
+        display: grid;
+        gap: 0.75rem;
+        margin-bottom: 0.8rem;
+      }
+
+      .stack {
+        display: grid;
+        gap: 0.5rem;
+      }
+
+      label {
+        font-size: 0.86rem;
+        font-weight: 700;
+      }
+
+      select,
+      input,
+      button {
+        width: 100%;
+        border-radius: 10px;
+        border: 1px solid #aac6d2;
+        padding: 0.62rem 0.8rem;
+        font-size: 0.98rem;
+        background: #fff;
+        color: var(--ink);
+      }
+
+      button {
+        cursor: pointer;
+        border: none;
+        color: #fff;
+        font-weight: 700;
+        background: linear-gradient(135deg, var(--accent), var(--accent-2));
+      }
+
+      button.secondary {
+        background: #7ec8ff;
+        color: #08344d;
+        border: 1px solid #5fb4f3;
+      }
+
+      button.danger {
+        background: var(--danger);
+      }
+
+      .toolbar {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 0.5rem;
+      }
+
+      .table-wrap {
+        margin: 1rem 0 0.6rem;
+        border-radius: 14px;
+        background: linear-gradient(135deg, #fff, #eef8ff);
+        border: 1px solid #deedf5;
+        overflow: hidden;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+
+      th,
+      td {
+        text-align: left;
+        padding: 0.72rem 0.9rem;
+        border-bottom: 1px solid #d8e8f1;
+      }
+
+      th {
+        font-size: 0.85rem;
+        color: #274658;
+        letter-spacing: 0.02em;
+      }
+
+      td:last-child,
+      th:last-child {
+        text-align: right;
+      }
+
+      tr:last-child td {
+        border-bottom: none;
+      }
+
+      tbody tr {
+        cursor: pointer;
+      }
+
+      tbody tr.selected {
+        background: #dff1ff;
+      }
+
+      .meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.6rem 1rem;
+        color: var(--muted);
+        font-size: 0.88rem;
+      }
+
+      .status {
+        min-height: 1.2rem;
+        margin-top: 0.7rem;
+        font-size: 0.9rem;
+      }
+
+      .status.error {
+        color: var(--danger);
+      }
+
+      .bottom-actions {
+        margin-top: 0.8rem;
+      }
+
+      @media (max-width: 600px) {
+        .toolbar {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="panel">
+      <h1>Amar Alarms Counter</h1>
+      <p class="sub">Choose a location and see alarms from February 2026 and later.</p>
+
+      <section class="table-wrap" aria-live="polite">
+        <table>
+          <thead>
+            <tr>
+              <th>Location</th>
+              <th>Alarm Count</th>
+            </tr>
+          </thead>
+          <tbody id="tableBody"></tbody>
+        </table>
+      </section>
+
+      <section class="controls" aria-label="Manage locations">
+        <label for="newLocationInput">Add a location</label>
+        <div class="toolbar">
+          <input id="newLocationInput" type="text" placeholder="Type to search CSV locations" list="cityOptions" />
+          <datalist id="cityOptions"></datalist>
+          <button id="addLocationBtn" type="button" class="secondary">Add</button>
+        </div>
+        <button id="removeLocationBtn" type="button" class="danger">Remove Selected Location</button>
+      </section>
+
+      <div class="meta">
+        <div>Total rows loaded: <span id="totalRows">0</span></div>
+        <div>Last refreshed: <span id="lastRefreshed">Never</span></div>
+      </div>
+
+      <div id="status" class="status"></div>
+      <div class="bottom-actions">
+        <button id="refreshBtn" type="button">Refresh Data</button>
+      </div>
+    </main>
+
+    <script>
+      const DATA_URL =
+        "https://raw.githubusercontent.com/yuval-harpaz/alarms/refs/heads/master/data/alarms.csv";
+      const MIN_DATE = new Date("2026-02-01T00:00:00");
+      const STORAGE_LOCATIONS_KEY = "alarmCounter.locations";
+      const FALLBACK_LOCATIONS = ["מזכרת בתיה", "מרכז חבר", "שמשית", "בר יוחאי", "עפולה"];
+
+      const els = {
+        tableBody: document.getElementById("tableBody"),
+        cityOptions: document.getElementById("cityOptions"),
+        refreshBtn: document.getElementById("refreshBtn"),
+        addLocationBtn: document.getElementById("addLocationBtn"),
+        removeLocationBtn: document.getElementById("removeLocationBtn"),
+        newLocationInput: document.getElementById("newLocationInput"),
+        totalRows: document.getElementById("totalRows"),
+        lastRefreshed: document.getElementById("lastRefreshed"),
+        status: document.getElementById("status"),
+      };
+
+      let rows = [];
+      let citySuggestions = [];
+      let selectedLocation = "";
+
+      function parseCSV(text) {
+        const result = [];
+        let row = [];
+        let value = "";
+        let inQuotes = false;
+
+        for (let i = 0; i < text.length; i += 1) {
+          const char = text[i];
+          const next = text[i + 1];
+
+          if (char === '"') {
+            if (inQuotes && next === '"') {
+              value += '"';
+              i += 1;
+            } else {
+              inQuotes = !inQuotes;
+            }
+          } else if (char === "," && !inQuotes) {
+            row.push(value);
+            value = "";
+          } else if ((char === "\n" || char === "\r") && !inQuotes) {
+            if (char === "\r" && next === "\n") i += 1;
+            row.push(value);
+            if (row.length > 1 || row[0] !== "") {
+              result.push(row);
+            }
+            row = [];
+            value = "";
+          } else {
+            value += char;
+          }
+        }
+
+        if (value.length > 0 || row.length > 0) {
+          row.push(value);
+          result.push(row);
+        }
+
+        if (result.length === 0) return [];
+
+        const headers = result[0].map((h) => h.trim());
+        return result.slice(1).map((cells) => {
+          const obj = {};
+          headers.forEach((h, i) => {
+            obj[h] = (cells[i] || "").trim();
+          });
+          return obj;
+        });
+      }
+
+      function loadLocations() {
+        try {
+          const raw = localStorage.getItem(STORAGE_LOCATIONS_KEY);
+          if (!raw) return [...FALLBACK_LOCATIONS];
+          const parsed = JSON.parse(raw);
+          if (!Array.isArray(parsed)) return [...FALLBACK_LOCATIONS];
+          const unique = [...new Set(parsed.map((v) => String(v).trim()).filter(Boolean))];
+          return unique.length ? unique : [...FALLBACK_LOCATIONS];
+        } catch {
+          return [...FALLBACK_LOCATIONS];
+        }
+      }
+
+      function saveLocations(locations) {
+        localStorage.setItem(STORAGE_LOCATIONS_KEY, JSON.stringify(locations));
+      }
+
+      function updateStatus(message, isError = false) {
+        els.status.textContent = message;
+        els.status.classList.toggle("error", isError);
+      }
+
+      function countByLocation() {
+        return rows.reduce((map, row) => {
+          const city = row.cities;
+          if (!city || !row.time) return map;
+          const rowDate = new Date(row.time.replace(" ", "T"));
+          if (Number.isNaN(rowDate.getTime()) || rowDate < MIN_DATE) return map;
+          map[city] = (map[city] || 0) + 1;
+          return map;
+        }, {});
+      }
+
+      function renderTable() {
+        const locations = loadLocations();
+        const counts = countByLocation();
+        const sortedLocations = [...locations].sort((a, b) => {
+          const countDiff = (counts[b] || 0) - (counts[a] || 0);
+          if (countDiff !== 0) return countDiff;
+          return a.localeCompare(b);
+        });
+        els.tableBody.innerHTML = "";
+
+        sortedLocations.forEach((location) => {
+          const tr = document.createElement("tr");
+          tr.dataset.location = location;
+          tr.classList.toggle("selected", location === selectedLocation);
+          const locationCell = document.createElement("td");
+          const countCell = document.createElement("td");
+          locationCell.textContent = location;
+          countCell.textContent = (counts[location] || 0).toLocaleString();
+          tr.append(locationCell, countCell);
+          els.tableBody.appendChild(tr);
+        });
+      }
+
+      function renderAutocomplete() {
+        els.cityOptions.innerHTML = "";
+
+        citySuggestions.forEach((city) => {
+          const option = document.createElement("option");
+          option.value = city;
+          els.cityOptions.appendChild(option);
+        });
+      }
+
+      async function refreshData() {
+        updateStatus("Refreshing data...");
+        els.refreshBtn.disabled = true;
+
+        try {
+          const response = await fetch(DATA_URL, { cache: "no-store" });
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+          }
+
+          const text = await response.text();
+          rows = parseCSV(text);
+          citySuggestions = [...new Set(rows.map((row) => row.cities).filter(Boolean))].sort((a, b) =>
+            a.localeCompare(b)
+          );
+          els.totalRows.textContent = rows.length.toLocaleString();
+          els.lastRefreshed.textContent = new Date().toLocaleString();
+          renderAutocomplete();
+          renderTable();
+          updateStatus("Data refreshed successfully.");
+        } catch (error) {
+          updateStatus(`Failed to refresh data: ${error.message}`, true);
+        } finally {
+          els.refreshBtn.disabled = false;
+        }
+      }
+
+      function addLocation() {
+        const value = els.newLocationInput.value.trim();
+        if (!value) {
+          updateStatus("Enter a location name before adding.", true);
+          return;
+        }
+
+        const locations = loadLocations();
+        if (locations.includes(value)) {
+          updateStatus("Location already exists.", true);
+          return;
+        }
+
+        if (citySuggestions.length > 0 && !citySuggestions.includes(value)) {
+          updateStatus("Location must match a city that exists in the CSV.", true);
+          return;
+        }
+
+        locations.push(value);
+        saveLocations(locations);
+        selectedLocation = value;
+        renderTable();
+        els.newLocationInput.value = "";
+        updateStatus(`Added location: ${value}`);
+      }
+
+      function removeSelectedLocation() {
+        const selected = selectedLocation;
+        if (!selected) {
+          updateStatus("Select a location in the table to remove.", true);
+          return;
+        }
+
+        const locations = loadLocations().filter((location) => location !== selected);
+
+        if (locations.length === 0) {
+          updateStatus("Keep at least one location in the list.", true);
+          return;
+        }
+
+        saveLocations(locations);
+        selectedLocation = locations[0] || "";
+        renderTable();
+        updateStatus(`Removed location: ${selected}`);
+      }
+
+      function bindEvents() {
+        els.refreshBtn.addEventListener("click", refreshData);
+        els.addLocationBtn.addEventListener("click", addLocation);
+        els.removeLocationBtn.addEventListener("click", removeSelectedLocation);
+        els.tableBody.addEventListener("click", (event) => {
+          const row = event.target.closest("tr");
+          if (!row || !row.dataset.location) return;
+          selectedLocation = row.dataset.location;
+          renderTable();
+        });
+
+        els.newLocationInput.addEventListener("keydown", (event) => {
+          if (event.key === "Enter") {
+            event.preventDefault();
+            addLocation();
+          }
+        });
+      }
+
+      function init() {
+        selectedLocation = loadLocations()[0] || "";
+        renderTable();
+        bindEvents();
+        refreshData();
+      }
+
+      init();
+    </script>
+  </body>
+</html>
