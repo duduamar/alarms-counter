@@ -63,6 +63,13 @@
         margin-bottom: 0.8rem;
       }
 
+      .view-toggle {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 0.5rem;
+        margin-bottom: 0.7rem;
+      }
+
       .stack {
         display: grid;
         gap: 0.5rem;
@@ -117,6 +124,10 @@
         overflow: hidden;
       }
 
+      .view.hidden {
+        display: none;
+      }
+
       table {
         width: 100%;
         border-collapse: collapse;
@@ -150,6 +161,112 @@
 
       tbody tr.selected {
         background: #dff1ff;
+      }
+
+      .graph-wrap {
+        padding: 0.9rem;
+        display: grid;
+        gap: 0.55rem;
+      }
+
+      .bar-row {
+        display: grid;
+        grid-template-columns: minmax(120px, 1fr) 3fr auto;
+        align-items: center;
+        gap: 0.6rem;
+        cursor: pointer;
+        border-radius: 10px;
+        padding: 0.2rem 0.3rem;
+      }
+
+      .bar-row.selected {
+        background: #dff1ff;
+      }
+
+      .bar-label {
+        font-size: 0.9rem;
+        display: flex;
+        align-items: center;
+        gap: 0.4rem;
+      }
+
+      .podium-badge {
+        position: relative;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 1.6rem;
+        height: 1.6rem;
+        color: #c8a241;
+      }
+
+      .podium-icon {
+        width: 1.5rem;
+        height: 1.5rem;
+        filter: drop-shadow(0 2px 2px rgba(0, 0, 0, 0.22));
+        animation: trophy-bob 2.2s ease-in-out infinite;
+      }
+
+      .podium-rank {
+        position: absolute;
+        top: 0.36rem;
+        left: 50%;
+        transform: translateX(-50%);
+        font-size: 0.6rem;
+        font-weight: 800;
+        color: #0f2230;
+        line-height: 1;
+        pointer-events: none;
+      }
+
+      .podium-gold {
+        color: #d9ac32;
+      }
+
+      .podium-silver {
+        color: #aeb8c3;
+      }
+
+      .podium-silver .podium-icon {
+        animation-delay: 0.18s;
+      }
+
+      .podium-bronze {
+        color: #ba7c48;
+      }
+
+      .podium-bronze .podium-icon {
+        animation-delay: 0.32s;
+      }
+
+      @keyframes trophy-bob {
+        0%,
+        100% {
+          transform: translateY(0) scale(1);
+        }
+        50% {
+          transform: translateY(-2px) scale(1.04);
+        }
+      }
+
+      .bar-track {
+        width: 100%;
+        height: 14px;
+        border-radius: 999px;
+        background: #e4eef5;
+        overflow: hidden;
+      }
+
+      .bar-fill {
+        height: 100%;
+        border-radius: 999px;
+        background: linear-gradient(135deg, #2da8ff, #0a9396);
+      }
+
+      .bar-value {
+        font-weight: 700;
+        min-width: 2ch;
+        text-align: right;
       }
 
       .meta {
@@ -186,7 +303,12 @@
       <h1>Amar Alarms Counter</h1>
       <p class="sub">Choose a location and see alarms from February 2026 and later.</p>
 
-      <section class="table-wrap" aria-live="polite">
+      <section class="view-toggle" aria-label="Toggle view">
+        <button id="tableViewBtn" type="button">Table View</button>
+        <button id="graphViewBtn" type="button" class="secondary">Graph View</button>
+      </section>
+
+      <section id="tableView" class="table-wrap view" aria-live="polite">
         <table>
           <thead>
             <tr>
@@ -196,6 +318,9 @@
           </thead>
           <tbody id="tableBody"></tbody>
         </table>
+      </section>
+      <section id="graphView" class="table-wrap view hidden" aria-live="polite">
+        <div id="graphBars" class="graph-wrap"></div>
       </section>
 
       <section class="controls" aria-label="Manage locations">
@@ -228,6 +353,11 @@
 
       const els = {
         tableBody: document.getElementById("tableBody"),
+        graphBars: document.getElementById("graphBars"),
+        tableView: document.getElementById("tableView"),
+        graphView: document.getElementById("graphView"),
+        tableViewBtn: document.getElementById("tableViewBtn"),
+        graphViewBtn: document.getElementById("graphViewBtn"),
         cityOptions: document.getElementById("cityOptions"),
         refreshBtn: document.getElementById("refreshBtn"),
         addLocationBtn: document.getElementById("addLocationBtn"),
@@ -241,6 +371,7 @@
       let rows = [];
       let citySuggestions = [];
       let selectedLocation = "";
+      let currentView = "table";
 
       function parseCSV(text) {
         const result = [];
@@ -325,7 +456,7 @@
         }, {});
       }
 
-      function renderTable() {
+      function getSortedLocationData() {
         const locations = loadLocations();
         const counts = countByLocation();
         const sortedLocations = [...locations].sort((a, b) => {
@@ -333,19 +464,79 @@
           if (countDiff !== 0) return countDiff;
           return a.localeCompare(b);
         });
+        return sortedLocations.map((location) => ({ location, count: counts[location] || 0 }));
+      }
+
+      function renderTable() {
+        const data = getSortedLocationData();
         els.tableBody.innerHTML = "";
 
-        sortedLocations.forEach((location) => {
+        data.forEach(({ location, count }) => {
           const tr = document.createElement("tr");
           tr.dataset.location = location;
           tr.classList.toggle("selected", location === selectedLocation);
           const locationCell = document.createElement("td");
           const countCell = document.createElement("td");
           locationCell.textContent = location;
-          countCell.textContent = (counts[location] || 0).toLocaleString();
+          countCell.textContent = count.toLocaleString();
           tr.append(locationCell, countCell);
           els.tableBody.appendChild(tr);
         });
+      }
+
+      function renderGraph() {
+        const data = getSortedLocationData();
+        const maxCount = data.reduce((max, item) => Math.max(max, item.count), 0) || 1;
+        els.graphBars.innerHTML = "";
+
+        data.forEach(({ location, count }, index) => {
+          const row = document.createElement("div");
+          row.className = "bar-row";
+          row.dataset.location = location;
+          row.classList.toggle("selected", location === selectedLocation);
+
+          const label = document.createElement("div");
+          label.className = "bar-label";
+          if (index < 3) {
+            const badge = document.createElement("span");
+            badge.className = "podium-badge";
+            if (index === 0) badge.classList.add("podium-gold");
+            if (index === 1) badge.classList.add("podium-silver");
+            if (index === 2) badge.classList.add("podium-bronze");
+            badge.innerHTML =
+              `<svg class="podium-icon" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M18 2H6v3H3v3c0 2.76 2.24 5 5 5h.28A6.99 6.99 0 0 0 11 16.93V20H8v2h8v-2h-3v-3.07A6.99 6.99 0 0 0 15.72 13H16c2.76 0 5-2.24 5-5V5h-3V2Zm-2 9V4H8v7a4 4 0 1 0 8 0ZM5 8V7h1v3.82A3 3 0 0 1 5 8Zm14 0a3 3 0 0 1-1 2.24V7h1v1Z"/></svg><span class="podium-rank">${index + 1}</span>`;
+            label.appendChild(badge);
+          }
+          label.appendChild(document.createTextNode(location));
+
+          const track = document.createElement("div");
+          track.className = "bar-track";
+          const fill = document.createElement("div");
+          fill.className = "bar-fill";
+          fill.style.width = `${(count / maxCount) * 100}%`;
+          track.appendChild(fill);
+
+          const value = document.createElement("div");
+          value.className = "bar-value";
+          value.textContent = count.toLocaleString();
+
+          row.append(label, track, value);
+          els.graphBars.appendChild(row);
+        });
+      }
+
+      function renderViews() {
+        renderTable();
+        renderGraph();
+      }
+
+      function setView(view) {
+        currentView = view;
+        const showTable = currentView === "table";
+        els.tableView.classList.toggle("hidden", !showTable);
+        els.graphView.classList.toggle("hidden", showTable);
+        els.tableViewBtn.classList.toggle("secondary", !showTable);
+        els.graphViewBtn.classList.toggle("secondary", showTable);
       }
 
       function renderAutocomplete() {
@@ -376,7 +567,7 @@
           els.totalRows.textContent = rows.length.toLocaleString();
           els.lastRefreshed.textContent = new Date().toLocaleString();
           renderAutocomplete();
-          renderTable();
+          renderViews();
           updateStatus("Data refreshed successfully.");
         } catch (error) {
           updateStatus(`Failed to refresh data: ${error.message}`, true);
@@ -406,7 +597,7 @@
         locations.push(value);
         saveLocations(locations);
         selectedLocation = value;
-        renderTable();
+        renderViews();
         els.newLocationInput.value = "";
         updateStatus(`Added location: ${value}`);
       }
@@ -427,7 +618,7 @@
 
         saveLocations(locations);
         selectedLocation = locations[0] || "";
-        renderTable();
+        renderViews();
         updateStatus(`Removed location: ${selected}`);
       }
 
@@ -435,11 +626,19 @@
         els.refreshBtn.addEventListener("click", refreshData);
         els.addLocationBtn.addEventListener("click", addLocation);
         els.removeLocationBtn.addEventListener("click", removeSelectedLocation);
+        els.tableViewBtn.addEventListener("click", () => setView("table"));
+        els.graphViewBtn.addEventListener("click", () => setView("graph"));
         els.tableBody.addEventListener("click", (event) => {
           const row = event.target.closest("tr");
           if (!row || !row.dataset.location) return;
           selectedLocation = row.dataset.location;
-          renderTable();
+          renderViews();
+        });
+        els.graphBars.addEventListener("click", (event) => {
+          const row = event.target.closest(".bar-row");
+          if (!row || !row.dataset.location) return;
+          selectedLocation = row.dataset.location;
+          renderViews();
         });
 
         els.newLocationInput.addEventListener("keydown", (event) => {
@@ -452,7 +651,8 @@
 
       function init() {
         selectedLocation = loadLocations()[0] || "";
-        renderTable();
+        renderViews();
+        setView("graph");
         bindEvents();
         refreshData();
       }
