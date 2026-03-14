@@ -65,7 +65,7 @@
 
       .view-toggle {
         display: grid;
-        grid-template-columns: 1fr 1fr;
+        grid-template-columns: repeat(3, 1fr);
         gap: 0.5rem;
         margin-bottom: 0.7rem;
       }
@@ -167,6 +167,51 @@
         padding: 0.9rem;
         display: grid;
         gap: 0.55rem;
+      }
+
+      .trend-controls {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        gap: 0.6rem;
+        align-items: end;
+      }
+
+      .trend-chart {
+        border-radius: 12px;
+        background: #ffffff;
+        border: 1px solid #d8e8f1;
+        padding: 0.6rem;
+        overflow-x: auto;
+      }
+
+      .trend-chart svg {
+        display: block;
+      }
+
+      .trend-legend {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem 0.9rem;
+        font-size: 0.85rem;
+        color: var(--muted);
+      }
+
+      .trend-legend span {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.35rem;
+      }
+
+      .legend-swatch {
+        width: 0.65rem;
+        height: 0.65rem;
+        border-radius: 999px;
+      }
+
+      .trend-empty {
+        padding: 1.2rem;
+        color: var(--muted);
+        text-align: center;
       }
 
       .bar-row {
@@ -306,6 +351,7 @@
       <section class="view-toggle" aria-label="Toggle view">
         <button id="tableViewBtn" type="button">Table View</button>
         <button id="graphViewBtn" type="button" class="secondary">Graph View</button>
+        <button id="trendViewBtn" type="button" class="secondary">Trend View</button>
       </section>
 
       <section id="tableView" class="table-wrap view" aria-live="polite">
@@ -321,6 +367,30 @@
       </section>
       <section id="graphView" class="table-wrap view hidden" aria-live="polite">
         <div id="graphBars" class="graph-wrap"></div>
+      </section>
+      <section id="trendView" class="table-wrap view hidden" aria-live="polite">
+        <div class="graph-wrap">
+          <div class="trend-controls">
+            <div class="stack">
+              <label for="trendBucket">Time bucket</label>
+              <select id="trendBucket">
+                <option value="day">Daily</option>
+                <option value="week">Weekly</option>
+              </select>
+            </div>
+            <div class="stack">
+              <label for="trendRange">Range</label>
+              <select id="trendRange">
+                <option value="30">Last 30 days</option>
+                <option value="90" selected>Last 90 days</option>
+                <option value="180">Last 180 days</option>
+                <option value="all">All time</option>
+              </select>
+            </div>
+          </div>
+          <div id="trendChart" class="trend-chart"></div>
+          <div id="trendLegend" class="trend-legend"></div>
+        </div>
       </section>
 
       <section class="controls" aria-label="Manage locations">
@@ -356,8 +426,10 @@
         graphBars: document.getElementById("graphBars"),
         tableView: document.getElementById("tableView"),
         graphView: document.getElementById("graphView"),
+        trendView: document.getElementById("trendView"),
         tableViewBtn: document.getElementById("tableViewBtn"),
         graphViewBtn: document.getElementById("graphViewBtn"),
+        trendViewBtn: document.getElementById("trendViewBtn"),
         cityOptions: document.getElementById("cityOptions"),
         refreshBtn: document.getElementById("refreshBtn"),
         addLocationBtn: document.getElementById("addLocationBtn"),
@@ -366,12 +438,28 @@
         totalRows: document.getElementById("totalRows"),
         lastRefreshed: document.getElementById("lastRefreshed"),
         status: document.getElementById("status"),
+        trendBucket: document.getElementById("trendBucket"),
+        trendRange: document.getElementById("trendRange"),
+        trendChart: document.getElementById("trendChart"),
+        trendLegend: document.getElementById("trendLegend"),
       };
 
       let rows = [];
       let citySuggestions = [];
       let selectedLocation = "";
       let currentView = "table";
+      const TREND_COLORS = [
+        "#005f73",
+        "#0a9396",
+        "#2da8ff",
+        "#f4a261",
+        "#e76f51",
+        "#2a9d8f",
+        "#3d405b",
+        "#e9c46a",
+        "#264653",
+        "#6d597a",
+      ];
 
       function parseCSV(text) {
         const result = [];
@@ -445,13 +533,27 @@
         els.status.classList.toggle("error", isError);
       }
 
-      function countByLocation() {
-        return rows.reduce((map, row) => {
+      function parseRowDate(row) {
+        if (!row || !row.time) return null;
+        const parsed = new Date(row.time.replace(" ", "T"));
+        if (Number.isNaN(parsed.getTime())) return null;
+        return parsed;
+      }
+
+      function getValidRows() {
+        return rows.reduce((acc, row) => {
           const city = row.cities;
-          if (!city || !row.time) return map;
-          const rowDate = new Date(row.time.replace(" ", "T"));
-          if (Number.isNaN(rowDate.getTime()) || rowDate < MIN_DATE) return map;
-          map[city] = (map[city] || 0) + 1;
+          if (!city) return acc;
+          const rowDate = parseRowDate(row);
+          if (!rowDate || rowDate < MIN_DATE) return acc;
+          acc.push({ city, date: rowDate });
+          return acc;
+        }, []);
+      }
+
+      function countByLocation() {
+        return getValidRows().reduce((map, row) => {
+          map[row.city] = (map[row.city] || 0) + 1;
           return map;
         }, {});
       }
@@ -525,18 +627,234 @@
         });
       }
 
+      function getDayStart(date) {
+        const d = new Date(date);
+        d.setHours(0, 0, 0, 0);
+        return d;
+      }
+
+      function getWeekStart(date) {
+        const d = getDayStart(date);
+        const dayIndex = (d.getDay() + 6) % 7;
+        d.setDate(d.getDate() - dayIndex);
+        return d;
+      }
+
+      function getBucketKey(date, bucket) {
+        const start = bucket === "week" ? getWeekStart(date) : getDayStart(date);
+        return start.toISOString().slice(0, 10);
+      }
+
+      function buildTrendData(bucket, rangeValue) {
+        const locations = loadLocations();
+        const validRows = getValidRows();
+
+        if (validRows.length === 0) {
+          return {
+            locations,
+            bucketItems: [],
+            series: new Map(),
+            maxValue: 0,
+          };
+        }
+
+        const latestDate = validRows.reduce(
+          (latest, row) => (row.date > latest ? row.date : latest),
+          validRows[0].date
+        );
+
+        let cutoff = null;
+        if (rangeValue !== "all") {
+          const days = Number(rangeValue);
+          if (!Number.isNaN(days)) {
+            cutoff = getDayStart(new Date(latestDate));
+            cutoff.setDate(cutoff.getDate() - days + 1);
+          }
+        }
+
+        const bucketMap = new Map();
+        const series = new Map();
+        locations.forEach((location) => {
+          series.set(location, new Map());
+        });
+
+        validRows.forEach(({ city, date }) => {
+          if (cutoff && date < cutoff) return;
+          if (!series.has(city)) return;
+          const key = getBucketKey(date, bucket);
+          if (!bucketMap.has(key)) {
+            bucketMap.set(key, bucket === "week" ? getWeekStart(date) : getDayStart(date));
+          }
+          const locationSeries = series.get(city);
+          locationSeries.set(key, (locationSeries.get(key) || 0) + 1);
+        });
+
+        const bucketItems = [...bucketMap.entries()]
+          .map(([key, date]) => ({ key, date }))
+          .sort((a, b) => a.date - b.date);
+
+        if (bucketItems.length > 0) {
+          const firstDate = bucketItems[0].date;
+          const preDate = new Date(firstDate);
+          if (bucket === "week") {
+            preDate.setDate(preDate.getDate() - 7);
+          } else {
+            preDate.setDate(preDate.getDate() - 1);
+          }
+          const preKey = getBucketKey(preDate, bucket);
+          if (!bucketItems.some((item) => item.key === preKey)) {
+            bucketItems.unshift({ key: preKey, date: preDate });
+          }
+        }
+
+        let maxValue = 0;
+        locations.forEach((location) => {
+          const locationSeries = series.get(location) || new Map();
+          let runningTotal = 0;
+          bucketItems.forEach((item) => {
+            runningTotal += locationSeries.get(item.key) || 0;
+            locationSeries.set(item.key, runningTotal);
+            if (runningTotal > maxValue) maxValue = runningTotal;
+          });
+        });
+
+        return { locations, bucketItems, series, maxValue };
+      }
+
+      function renderTrend() {
+        const bucket = els.trendBucket.value;
+        const rangeValue = els.trendRange.value;
+        const { locations, bucketItems, series, maxValue } = buildTrendData(bucket, rangeValue);
+
+        els.trendChart.innerHTML = "";
+        els.trendLegend.innerHTML = "";
+
+        if (bucketItems.length === 0) {
+          const empty = document.createElement("div");
+          empty.className = "trend-empty";
+          empty.textContent = "No alert data available for the selected range.";
+          els.trendChart.appendChild(empty);
+          return;
+        }
+
+        const width = Math.max(640, bucketItems.length * 26);
+        const height = 320;
+        const padding = { top: 20, right: 20, bottom: 45, left: 48 };
+        const plotWidth = width - padding.left - padding.right;
+        const plotHeight = height - padding.top - padding.bottom;
+        const maxY = maxValue > 0 ? maxValue : 1;
+
+        const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+        svg.setAttribute("width", String(width));
+        svg.setAttribute("height", String(height));
+        svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+        svg.setAttribute("role", "img");
+        svg.setAttribute("aria-label", "Alert counts over time");
+
+        const axis = document.createElementNS("http://www.w3.org/2000/svg", "g");
+        axis.setAttribute("stroke", "#a2b6c3");
+        axis.setAttribute("stroke-width", "1");
+
+        const yTicks = 4;
+        for (let i = 0; i <= yTicks; i += 1) {
+          const value = Math.round((maxY / yTicks) * i);
+          const y = padding.top + plotHeight - (plotHeight * i) / yTicks;
+          const tick = document.createElementNS("http://www.w3.org/2000/svg", "line");
+          tick.setAttribute("x1", String(padding.left));
+          tick.setAttribute("x2", String(width - padding.right));
+          tick.setAttribute("y1", String(y));
+          tick.setAttribute("y2", String(y));
+          tick.setAttribute("stroke", "#e3edf3");
+          axis.appendChild(tick);
+
+          const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
+          label.setAttribute("x", String(padding.left - 10));
+          label.setAttribute("y", String(y + 4));
+          label.setAttribute("text-anchor", "end");
+          label.setAttribute("fill", "#60707b");
+          label.setAttribute("font-size", "11");
+          label.textContent = value.toLocaleString();
+          svg.appendChild(label);
+        }
+
+        svg.appendChild(axis);
+
+        const points = bucketItems.map((item, index) => {
+          const x =
+            bucketItems.length === 1
+              ? padding.left + plotWidth / 2
+              : padding.left + (plotWidth * index) / (bucketItems.length - 1);
+          return { x, date: item.date, key: item.key };
+        });
+
+        const xLabelStep = Math.max(1, Math.ceil(points.length / 6));
+        points.forEach((point, index) => {
+          if (index % xLabelStep !== 0 && index !== points.length - 1) return;
+          const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
+          label.setAttribute("x", String(point.x));
+          label.setAttribute("y", String(height - 18));
+          label.setAttribute("text-anchor", "middle");
+          label.setAttribute("fill", "#60707b");
+          label.setAttribute("font-size", "11");
+          label.textContent = point.date.toLocaleDateString(undefined, {
+            month: "short",
+            day: "numeric",
+          });
+          svg.appendChild(label);
+        });
+
+        locations.forEach((location, index) => {
+          const locationSeries = series.get(location);
+          if (!locationSeries) return;
+          let hasValue = false;
+          const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+          const color = TREND_COLORS[index % TREND_COLORS.length];
+          const segments = points
+            .map((point, pointIndex) => {
+              const value = locationSeries.get(point.key) || 0;
+              if (value > 0) hasValue = true;
+              const y = padding.top + plotHeight - (plotHeight * value) / maxY;
+              const prefix = pointIndex === 0 ? "M" : "L";
+              return `${prefix}${point.x},${y}`;
+            })
+            .join(" ");
+
+          path.setAttribute("d", segments);
+          path.setAttribute("fill", "none");
+          path.setAttribute("stroke", color);
+          path.setAttribute("stroke-width", "2.2");
+          path.setAttribute("opacity", hasValue ? "1" : "0.3");
+          svg.appendChild(path);
+
+          const legendItem = document.createElement("span");
+          const swatch = document.createElement("span");
+          swatch.className = "legend-swatch";
+          swatch.style.background = color;
+          legendItem.appendChild(swatch);
+          legendItem.appendChild(document.createTextNode(location));
+          els.trendLegend.appendChild(legendItem);
+        });
+
+        els.trendChart.appendChild(svg);
+      }
+
       function renderViews() {
         renderTable();
         renderGraph();
+        renderTrend();
       }
 
       function setView(view) {
         currentView = view;
         const showTable = currentView === "table";
+        const showGraph = currentView === "graph";
+        const showTrend = currentView === "trend";
         els.tableView.classList.toggle("hidden", !showTable);
-        els.graphView.classList.toggle("hidden", showTable);
+        els.graphView.classList.toggle("hidden", !showGraph);
+        els.trendView.classList.toggle("hidden", !showTrend);
         els.tableViewBtn.classList.toggle("secondary", !showTable);
-        els.graphViewBtn.classList.toggle("secondary", showTable);
+        els.graphViewBtn.classList.toggle("secondary", !showGraph);
+        els.trendViewBtn.classList.toggle("secondary", !showTrend);
       }
 
       function renderAutocomplete() {
@@ -628,6 +946,9 @@
         els.removeLocationBtn.addEventListener("click", removeSelectedLocation);
         els.tableViewBtn.addEventListener("click", () => setView("table"));
         els.graphViewBtn.addEventListener("click", () => setView("graph"));
+        els.trendViewBtn.addEventListener("click", () => setView("trend"));
+        els.trendBucket.addEventListener("change", renderTrend);
+        els.trendRange.addEventListener("change", renderTrend);
         els.tableBody.addEventListener("click", (event) => {
           const row = event.target.closest("tr");
           if (!row || !row.dataset.location) return;
