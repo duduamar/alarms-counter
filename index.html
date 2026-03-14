@@ -194,18 +194,36 @@
         gap: 0.5rem 0.9rem;
         font-size: 0.85rem;
         color: var(--muted);
+        align-items: center;
+      }
+
+      .trend-legend button {
+        width: auto;
+        font-size: 0.78rem;
+        padding: 0.35rem 0.55rem;
+        border-radius: 8px;
       }
 
       .trend-legend span {
         display: inline-flex;
         align-items: center;
         gap: 0.35rem;
+        cursor: pointer;
+        padding: 0.15rem 0.4rem;
+        border-radius: 999px;
+        border: 1px solid transparent;
       }
 
       .legend-swatch {
         width: 0.65rem;
         height: 0.65rem;
         border-radius: 999px;
+      }
+
+      .trend-legend span.hidden {
+        opacity: 0.45;
+        text-decoration: line-through;
+        border-color: #d3dee6;
       }
 
       .trend-empty {
@@ -389,7 +407,10 @@
             </div>
           </div>
           <div id="trendChart" class="trend-chart"></div>
-          <div id="trendLegend" class="trend-legend"></div>
+          <div id="trendLegend" class="trend-legend">
+            <button id="trendHideAll" type="button" class="secondary">Hide all</button>
+            <button id="trendShowAll" type="button" class="secondary">Show all</button>
+          </div>
         </div>
       </section>
 
@@ -419,6 +440,8 @@
         "https://raw.githubusercontent.com/yuval-harpaz/alarms/refs/heads/master/data/alarms.csv";
       const MIN_DATE = new Date("2026-02-01T00:00:00");
       const STORAGE_LOCATIONS_KEY = "alarmCounter.locations";
+      const STORAGE_TREND_HIDDEN_KEY = "alarmCounter.trendHidden";
+      const STORAGE_VIEW_KEY = "alarmCounter.activeView";
       const FALLBACK_LOCATIONS = ["מזכרת בתיה", "מרכז חבר", "שמשית", "בר יוחאי", "עפולה"];
 
       const els = {
@@ -442,12 +465,15 @@
         trendRange: document.getElementById("trendRange"),
         trendChart: document.getElementById("trendChart"),
         trendLegend: document.getElementById("trendLegend"),
+        trendHideAll: document.getElementById("trendHideAll"),
+        trendShowAll: document.getElementById("trendShowAll"),
       };
 
       let rows = [];
       let citySuggestions = [];
       let selectedLocation = "";
       let currentView = "table";
+      let hiddenTrendLocations = new Set();
       const TREND_COLORS = [
         "#005f73",
         "#0a9396",
@@ -526,6 +552,25 @@
 
       function saveLocations(locations) {
         localStorage.setItem(STORAGE_LOCATIONS_KEY, JSON.stringify(locations));
+      }
+
+      function loadHiddenTrendLocations() {
+        try {
+          const raw = localStorage.getItem(STORAGE_TREND_HIDDEN_KEY);
+          if (!raw) return new Set();
+          const parsed = JSON.parse(raw);
+          if (!Array.isArray(parsed)) return new Set();
+          return new Set(parsed.map((v) => String(v).trim()).filter(Boolean));
+        } catch {
+          return new Set();
+        }
+      }
+
+      function saveHiddenTrendLocations() {
+        localStorage.setItem(
+          STORAGE_TREND_HIDDEN_KEY,
+          JSON.stringify([...hiddenTrendLocations])
+        );
       }
 
       function updateStatus(message, isError = false) {
@@ -648,6 +693,13 @@
       function buildTrendData(bucket, rangeValue) {
         const locations = loadLocations();
         const validRows = getValidRows();
+        const filteredHidden = new Set(
+          [...hiddenTrendLocations].filter((location) => locations.includes(location))
+        );
+        if (filteredHidden.size !== hiddenTrendLocations.size) {
+          hiddenTrendLocations = filteredHidden;
+          saveHiddenTrendLocations();
+        }
 
         if (validRows.length === 0) {
           return {
@@ -727,7 +779,9 @@
         const { locations, bucketItems, series, maxValue } = buildTrendData(bucket, rangeValue);
 
         els.trendChart.innerHTML = "";
+        const legendButtons = els.trendLegend.querySelectorAll("button");
         els.trendLegend.innerHTML = "";
+        legendButtons.forEach((button) => els.trendLegend.appendChild(button));
 
         if (bucketItems.length === 0) {
           const empty = document.createElement("div");
@@ -809,6 +863,7 @@
           let hasValue = false;
           const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
           const color = TREND_COLORS[index % TREND_COLORS.length];
+          const isHidden = hiddenTrendLocations.has(location);
           const segments = points
             .map((point, pointIndex) => {
               const value = locationSeries.get(point.key) || 0;
@@ -819,19 +874,43 @@
             })
             .join(" ");
 
-          path.setAttribute("d", segments);
-          path.setAttribute("fill", "none");
-          path.setAttribute("stroke", color);
-          path.setAttribute("stroke-width", "2.2");
-          path.setAttribute("opacity", hasValue ? "1" : "0.3");
-          svg.appendChild(path);
+          if (!isHidden) {
+            path.setAttribute("d", segments);
+            path.setAttribute("fill", "none");
+            path.setAttribute("stroke", color);
+            path.setAttribute("stroke-width", "2.2");
+            path.setAttribute("opacity", hasValue ? "1" : "0.3");
+            svg.appendChild(path);
+          }
 
           const legendItem = document.createElement("span");
+          legendItem.classList.toggle("hidden", isHidden);
+          legendItem.setAttribute("role", "button");
+          legendItem.setAttribute("tabindex", "0");
+          legendItem.setAttribute(
+            "aria-label",
+            `${isHidden ? "Show" : "Hide"} ${location} series`
+          );
           const swatch = document.createElement("span");
           swatch.className = "legend-swatch";
           swatch.style.background = color;
           legendItem.appendChild(swatch);
           legendItem.appendChild(document.createTextNode(location));
+          legendItem.addEventListener("click", () => {
+            if (hiddenTrendLocations.has(location)) {
+              hiddenTrendLocations.delete(location);
+            } else {
+              hiddenTrendLocations.add(location);
+            }
+            saveHiddenTrendLocations();
+            renderTrend();
+          });
+          legendItem.addEventListener("keydown", (event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              legendItem.click();
+            }
+          });
           els.trendLegend.appendChild(legendItem);
         });
 
@@ -846,6 +925,7 @@
 
       function setView(view) {
         currentView = view;
+        localStorage.setItem(STORAGE_VIEW_KEY, view);
         const showTable = currentView === "table";
         const showGraph = currentView === "graph";
         const showTrend = currentView === "trend";
@@ -949,6 +1029,16 @@
         els.trendViewBtn.addEventListener("click", () => setView("trend"));
         els.trendBucket.addEventListener("change", renderTrend);
         els.trendRange.addEventListener("change", renderTrend);
+        els.trendHideAll.addEventListener("click", () => {
+          hiddenTrendLocations = new Set(loadLocations());
+          saveHiddenTrendLocations();
+          renderTrend();
+        });
+        els.trendShowAll.addEventListener("click", () => {
+          hiddenTrendLocations.clear();
+          saveHiddenTrendLocations();
+          renderTrend();
+        });
         els.tableBody.addEventListener("click", (event) => {
           const row = event.target.closest("tr");
           if (!row || !row.dataset.location) return;
@@ -972,8 +1062,13 @@
 
       function init() {
         selectedLocation = loadLocations()[0] || "";
+        hiddenTrendLocations = loadHiddenTrendLocations();
         renderViews();
-        setView("graph");
+        const savedView = localStorage.getItem(STORAGE_VIEW_KEY);
+        const initialView = ["table", "graph", "trend"].includes(savedView)
+          ? savedView
+          : "graph";
+        setView(initialView);
         bindEvents();
         refreshData();
       }
